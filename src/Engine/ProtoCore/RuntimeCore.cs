@@ -256,6 +256,9 @@ namespace ProtoCore
             RunningBlock = 0;
             ExecutionState = (int)ExecutionStateEventArgs.State.Invalid;
             StartPC = Constants.kInvalidPC;
+
+            // Clear dispatch cache for fresh resolution on each execution
+            CallSite.ClearDispatchCache();
         }
 
         protected void OnDispose()

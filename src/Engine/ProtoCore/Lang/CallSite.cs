@@ -222,6 +222,64 @@ namespace ProtoCore
 
         #endregion
 
+        #region Dispatch Cache (Swappable)
+
+        /// <summary>
+        /// The active dispatch cache implementation.
+        /// Can be swapped at runtime for A/B testing.
+        /// </summary>
+        private static IDispatchCache s_dispatchCache = NullDispatchCache.Instance;
+
+        /// <summary>
+        /// Sets the dispatch cache implementation.
+        /// </summary>
+        public static void SetDispatchCache(IDispatchCache cache)
+        {
+            s_dispatchCache = cache ?? NullDispatchCache.Instance;
+        }
+
+        /// <summary>
+        /// Enables the new dispatch caching implementation.
+        /// </summary>
+        public static void EnableDispatchCaching()
+        {
+            s_dispatchCache = new DispatchCache();
+        }
+
+        /// <summary>
+        /// Disables dispatch caching (reverts to original behavior).
+        /// </summary>
+        public static void DisableDispatchCaching()
+        {
+            s_dispatchCache = NullDispatchCache.Instance;
+        }
+
+        /// <summary>
+        /// Enables A/B testing mode.
+        /// </summary>
+        public static void EnableABTesting()
+        {
+            s_dispatchCache = new ABTestDispatchCache();
+        }
+
+        /// <summary>
+        /// Clears the dispatch cache.
+        /// </summary>
+        public static void ClearDispatchCache()
+        {
+            s_dispatchCache.Clear();
+        }
+
+        /// <summary>
+        /// Gets dispatch cache statistics.
+        /// </summary>
+        public static (long Hits, long Misses, double HitRatio, int Size) GetDispatchCacheStats()
+        {
+            return s_dispatchCache.GetStatistics();
+        }
+
+        #endregion
+
         #region constructors
 
         /// <summary>
@@ -1267,6 +1325,24 @@ namespace ProtoCore
             return DispatchNew(context, arguments, replicationGuides, domintListStructure, stackFrame, runtimeCore);
         }
 
+        /// <summary>
+        /// Builds a DispatchKey from the current call context.
+        /// </summary>
+        private DispatchKey BuildDispatchKey(
+            List<StackValue> arguments,
+            List<List<ReplicationGuide>> replicationGuides,
+            RuntimeCore runtimeCore)
+        {
+            // Build type signatures for all arguments
+            var typeSignatures = new TypeSignature[arguments.Count];
+            for (int i = 0; i < arguments.Count; i++)
+            {
+                typeSignatures[i] = new TypeSignature(arguments[i], runtimeCore);
+            }
+
+            return new DispatchKey(methodName, classScope, typeSignatures, replicationGuides);
+        }
+
         //Dispatch
         private StackValue DispatchNew(
             Context context,
@@ -1351,11 +1427,40 @@ namespace ProtoCore
             //Turn the replication guides into a guide -> List args data structure
             var partialInstructions = Replicator.BuildPartialReplicationInstructions(partialReplicationGuides);
 
-            //Get the fep that are resolved
+            //Get the fep that are resolved - with caching
             List<FunctionEndPoint> resolvesFeps;
             List<ReplicationInstruction> replicationInstructions;
 
-            ComputeFeps(context, arguments, funcGroup, partialInstructions, stackFrame, runtimeCore, out resolvesFeps, out replicationInstructions);
+            // Build cache key
+            var dispatchKey = BuildDispatchKey(arguments, partialReplicationGuides, runtimeCore);
+
+            // Try cache lookup first
+            if (s_dispatchCache.TryGet(dispatchKey, out var cachedResult))
+            {
+                // Validate cached FEPs still exist in function group
+                if (DispatchCache.ValidateFeps(cachedResult, funcGroup))
+                {
+                    resolvesFeps = cachedResult.GetFepList();
+                    replicationInstructions = cachedResult.GetInstructionList();
+                }
+                else
+                {
+                    // Stale cache - clear and recompute
+                    s_dispatchCache.Clear();
+                    ComputeFeps(context, arguments, funcGroup, partialInstructions, stackFrame, runtimeCore, out resolvesFeps, out replicationInstructions);
+
+                    // Store new result
+                    s_dispatchCache.Store(dispatchKey, new CachedDispatchResult(resolvesFeps, replicationInstructions));
+                }
+            }
+            else
+            {
+                // Cache miss - full computation
+                ComputeFeps(context, arguments, funcGroup, partialInstructions, stackFrame, runtimeCore, out resolvesFeps, out replicationInstructions);
+
+                // Store in cache
+                s_dispatchCache.Store(dispatchKey, new CachedDispatchResult(resolvesFeps, replicationInstructions));
+            }
 
             if (resolvesFeps.Count == 0)
             {
