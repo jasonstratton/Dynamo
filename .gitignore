@@ -68,6 +68,8 @@ launchSettings.json
 ###############
 .idea
 .vscode/
+.claude/
+CLAUDE.md
 
 #documentation files
 doc/html/
@@ -118,3 +120,5 @@ dynamods-splash-screen-*.tgz
 /src/DynamoCoreWpf/.npmrc
 /src/Notifications/.npmrc
 src/LibraryViewExtensionWebView2/.npmrc
+
+strattj/
