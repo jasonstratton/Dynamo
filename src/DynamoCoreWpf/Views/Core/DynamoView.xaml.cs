@@ -66,7 +66,7 @@ namespace Dynamo.Controls
     {
         public const string BackgroundPreviewName = "BackgroundPreview";
         private const int SideBarCollapseThreshold = 20;
-        private const int RightSideBarCollapseThreshold = 30;
+        private const int RightSideBarCollapseThreshold = 100;
         private const int navigationInterval = 100;
         private const string GraphMetadataExtensionId = "28992e1d-abb9-417f-8b1b-05e053bee670";
         // This is used to determine whether ESC key is being held down
@@ -2582,6 +2582,9 @@ namespace Dynamo.Controls
         {
             packageManagerWindow.Closed -= HandlePackageManagerWindowClosed;
             packageManagerWindow = null;
+            // Reset owner back to the main Dynamo window so that dialogs opened after
+            // the Package Manager closes do not attempt to use the now-closed window as owner.
+            dynamoViewModel.Owner = this;
 
             var cmd = Analytics.TrackCommandEvent("PackageManager");
             cmd.Dispose();
